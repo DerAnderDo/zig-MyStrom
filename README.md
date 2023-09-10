@@ -7,3 +7,5 @@ Move myStromer.service to /etc/systemd/system/ \
 Run `systemctl daemon-reload` \
 Run `systemctl enable myStromer` \
 Run `systemctl start myStromer`
+
+Note: change user to root, somehow doesnt work otherwise
