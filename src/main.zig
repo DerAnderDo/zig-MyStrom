@@ -9,17 +9,15 @@ var gpa_client = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 12 })
 const calloc = gpa_client.allocator();
 
 const Data = struct {
-        power: f32,
-        Ws: f32,
-        relay: bool,
-        temperature: f32,
+    power: f32,
+    relay: bool,
 };
 
 pub fn main() !void {
     var client: std.http.Client = .{ .allocator = calloc };
     defer client.deinit();
 
-    while(true) {
+    while (true) {
         std.time.sleep(30 * 1000 * 1000 * 1000);
 
         // if successful, move on, if error, continue (jump back to start)
@@ -36,15 +34,15 @@ pub fn main() !void {
         defer calloc.free(body);
 
         //validate json string
-        if ( validateJson(body) ) {
+        if (validateJson(body)) {
 
             //parse json string
-            const res = try std.json.parseFromSliceLeaky(Data, calloc, body, .{});
+            const res = try std.json.parseFromSliceLeaky(Data, calloc, body, .{ .ignore_unknown_fields = true });
 
             //read power value and relays state to decide if to turn off or not
-            std.debug.print("current power: {d:.2} | relay: {}\n", .{res.power, res.relay});
+            std.debug.print("current power: {d:.2} | relay: {}\n", .{ res.power, res.relay });
 
-            if ( (res.power <= POWER_THRESHOLD and res.power >= 20) and res.relay == true ) {
+            if ((res.power <= POWER_THRESHOLD and res.power >= 20) and res.relay == true) {
                 var req_off = try client.request(.GET, uri_off, .{ .allocator = calloc }, .{});
                 defer req_off.deinit();
                 try req_off.start();
@@ -56,8 +54,10 @@ pub fn main() !void {
 
 fn validateJson(string: []const u8) bool { // function wrapper
     var scanneroni = std.json.validate(calloc, string) catch false;
-    if (scanneroni == false){
+    if (scanneroni == false) {
         std.debug.print("JSON string is NOT valid!\n", .{});
         return false;
-    } else { return true; }
+    } else {
+        return true;
+    }
 }
