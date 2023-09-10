@@ -1,0 +1,12 @@
+[Unit]
+Description=MyStrom Ebike Service
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/myStromer
+TimeoutStopSec=infinity
+User=dietpi
+
+[Install]
+WantedBy=multi-user.target
