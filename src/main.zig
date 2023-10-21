@@ -1,24 +1,25 @@
 // TODO: restrict turn on before 21:00
+// handle power settings different than 3 number length
 
+// -----myStrom part-----
 const std = @import("std");
 const http = std.http;
-// myStrom part
 const uri = std.Uri.parse("http://192.168.2.25/report") catch unreachable;
 const uri_off = std.Uri.parse("http://192.168.2.25/relay?state=0") catch unreachable;
-var POWER_THRESHOLD: f32 = 140; // default value, maybe saved the last value received through HTTP API?
-// configuration API part
-const Thread = std.Thread;
-const log = std.log.scoped(.server);
-const server_addr = "0.0.0.0";
-const server_port = 8000;
-
-var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 12 }){};
-const allocator = gpa.allocator();
-
+var POWER_THRESHOLD: f32 = 120; // default value, maybe saved the last value received through HTTP API?
 const Data = struct {
     power: f32,
     relay: bool,
 };
+//-----configuration API part-----
+const Thread = std.Thread;
+const log = std.log.scoped(.server); // use only this instead of std.debug.print in the future?
+const server_addr = "0.0.0.0";
+const server_port = 8000;
+var lastData: Data = Data{ .power = 0, .relay = false };
+
+var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 12 }){};
+const allocator = gpa.allocator();
 
 // Run the server and handle incoming requests.
 fn runServer(server: *http.Server, alloc: std.mem.Allocator) !void {
@@ -29,21 +30,22 @@ fn runServer(server: *http.Server, alloc: std.mem.Allocator) !void {
         });
         defer response.deinit();
 
-        while (response.reset() != .closing) {
-            // Handle errors during request processing.
-            response.wait() catch |err| switch (err) {
-                error.HttpHeadersInvalid => continue :outer,
-                error.EndOfStream => continue,
-                else => return err,
-            };
+        // putting this in a while loop makes no sense if the server just has to deliver one information once per request
+        //while (response.reset() != .closing) {
+        // Handle errors during request processing.
+        response.wait() catch |err| switch (err) {
+            error.HttpHeadersInvalid => continue :outer,
+            error.EndOfStream => continue,
+            else => return err,
+        };
 
-            // Process the request.
-            try handleRequest(&response, alloc);
-        }
+        // Process the request.
+        try handleRequest(&response, alloc);
+        _ = response.reset();
+        //}
     }
 }
 
-// Handle an individual request.
 fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !void {
     // Log the request details.
     log.info("{s} {s} {s}", .{ @tagName(response.request.method), @tagName(response.request.version), response.request.target });
@@ -53,24 +55,21 @@ fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !voi
     defer alloc.free(body);
 
     // Set "connection" header to "keep-alive" if present in request headers.
-    if (response.request.headers.contains("connection")) {
-        try response.headers.append("connection", "keep-alive");
-    }
+    //if (response.request.headers.contains("connection")) {
+    //    try response.headers.append("connection", "keep-alive");
+    //}
 
-    // Check if the request target starts with "/get".
-    if (std.mem.startsWith(u8, response.request.target, "/power=")) {
-
+    if (std.mem.startsWith(u8, response.request.target, "/power=")) { // change the power threshold for the myStrom plug
         var powerSetting: f32 = try std.fmt.parseFloat(f32, response.request.target[7..]);
 
-        var oldPower: [4]u8 = undefined;
-        _ = std.fmt.bufPrintZ(&oldPower, "{d}", .{POWER_THRESHOLD}) catch @panic("error");
+        // left in as a general note on how to convert numbers to a string/slice
+        //var oldPower: [3]u8 = undefined;
+        //_ = std.fmt.bufPrint(&oldPower, "{d}", .{POWER_THRESHOLD}) catch @panic("error");
 
-        var newPower: [4]u8 = undefined;
-        _ = std.fmt.bufPrintZ(&newPower, "{d}", .{powerSetting}) catch @panic("error");
+        //var newPower: [3]u8 = undefined;
+        //_ = std.fmt.bufPrint(&newPower, "{d}", .{powerSetting}) catch @panic("error");
 
-        POWER_THRESHOLD = powerSetting;
-
-        // unused code
+        // Is there a reason to not send it chunked? Maybe performance? Have to calculate content length if not chunked
         // Check if the request target contains "?chunked".
         //if (std.mem.indexOf(u8, response.request.target, "?chunked") != null) {
         //    response.transfer_encoding = .chunked;
@@ -78,28 +77,24 @@ fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !voi
         //    response.transfer_encoding = .{ .content_length = 10 };
         //}
         response.transfer_encoding = .chunked;
-        // Set "content-type" header to "text/plain".
-        try response.headers.append("content-type", "text/plain");
+        // Set "content-type" header to "application/json" previously "text/plain"
+        try response.headers.append("content-type", "application/json");
 
         // Write the response body
-        // Reply with previous power threshold and if setting the new one was succesful
+        // Reply with previous power threshold
         try response.do();
         if (response.request.method != .HEAD) {
-            try response.writeAll("Old power threshold: ");
-            try response.writeAll(&oldPower); try response.writeAll("\n");
-            try response.writeAll("New power threshold: ");
-            try response.writeAll(&newPower); try response.writeAll("\n");
+            try std.json.stringify(.{ .oldThreshold = POWER_THRESHOLD, .newThreshold = powerSetting }, .{}, response.writer());
             try response.finish();
         }
-    } else if (std.mem.startsWith(u8, response.request.target, "/settings")) {
-        var oldPower: [4]u8 = undefined;
-        _ = std.fmt.bufPrintZ(&oldPower, "{d}", .{POWER_THRESHOLD}) catch @panic("error");
+        POWER_THRESHOLD = powerSetting;
+    } else if (std.mem.startsWith(u8, response.request.target, "/data")) { // request the last data containing power[W], relay state and the power threshold
         response.transfer_encoding = .chunked;
-        try response.headers.append("content-type", "text/plain");
+        try response.headers.append("content-type", "application/json");
         try response.do();
         if (response.request.method != .HEAD) {
-            try response.writeAll("Current power threshold: ");
-            try response.writeAll(&oldPower); try response.writeAll("\n");
+            //try std.json.stringify(.{ .@"Current threshold" = oldPower }, .{}, response.writer()); // spaces are allowed in json... but that looks odd
+            try std.json.stringify(.{ .currentThreshold = POWER_THRESHOLD, .power = lastData.power, .relay = lastData.relay }, .{}, response.writer());
             try response.finish();
         }
     } else {
@@ -113,11 +108,11 @@ pub fn main() !void {
     var client: http.Client = .{ .allocator = allocator };
     defer client.deinit();
 
-    // configuration API thread
+    // configuration API loop
     const handle = try Thread.spawn(.{}, threadWork, .{});
     handle.detach();
 
-    // myStrom API loop
+    // myStrom loop
     while (true) {
         std.time.sleep(30 * 1000 * 1000 * 1000);
 
@@ -139,9 +134,9 @@ pub fn main() !void {
 
             //parse json string
             const res = try std.json.parseFromSliceLeaky(Data, allocator, body, .{ .ignore_unknown_fields = true });
-
+            lastData = res;
             //read power value and relays state to decide if to turn off or not
-            std.debug.print("current power: {d:.2} | relay: {} | setting: {}\n", .{ res.power, res.relay, POWER_THRESHOLD });
+            std.debug.print("current power: {d:.2} | relay: {} | threshold: {d:.2}\n", .{ res.power, res.relay, POWER_THRESHOLD });
 
             if ((res.power <= POWER_THRESHOLD and res.power >= 20) and res.relay == true) {
                 var req_off = try client.request(.GET, uri_off, .{ .allocator = allocator }, .{});
@@ -153,8 +148,7 @@ pub fn main() !void {
     }
 }
 
-fn threadWork() !void
-{
+fn threadWork() !void {
     // Initialize the server.
     var server = http.Server.init(allocator, .{ .reuse_address = true });
     defer server.deinit();
@@ -166,16 +160,15 @@ fn threadWork() !void
     const address = std.net.Address.parseIp(server_addr, server_port) catch unreachable;
     try server.listen(address);
 
-    while (true)
-    {
+    while (true) {
         // Run the server.
         runServer(&server, allocator) catch |err| {
-        // Handle server errors.
-        log.err("server error: {}\n", .{err});
-        if (@errorReturnTrace()) |trace| {
-            std.debug.dumpStackTrace(trace.*);
-        }
-        std.os.exit(1);
+            // Handle server errors.
+            log.err("server error: {}\n", .{err});
+            if (@errorReturnTrace()) |trace| {
+                std.debug.dumpStackTrace(trace.*);
+            }
+            std.os.exit(1);
         };
     }
 }
