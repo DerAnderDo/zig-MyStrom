@@ -1,5 +1,4 @@
 // TODO: restrict turn on before 21:00
-// handle power settings different than 3 number length
 
 // -----myStrom part-----
 const std = @import("std");
