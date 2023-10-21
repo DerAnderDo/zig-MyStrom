@@ -72,4 +72,4 @@ pub fn build(b: *std.Build) void {
 }
 
 // build for NanoPi R5C 
-// zig build-exe main.zig -O ReleaseSmall -fstrip -fsingle-threaded -target aarch64-linux
+// zig build-exe main.zig -O ReleaseSmall -fstrip -target aarch64-linux
