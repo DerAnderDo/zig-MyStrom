@@ -135,7 +135,7 @@ pub fn main() !void {
             const res = try std.json.parseFromSliceLeaky(Data, allocator, body, .{ .ignore_unknown_fields = true });
             lastData = res;
             //read power value and relays state to decide if to turn off or not
-            std.debug.print("current power: {d:.2} | relay: {} | threshold: {d:.2}\n", .{ res.power, res.relay, POWER_THRESHOLD });
+            //std.debug.print("current power: {d:.2} | relay: {} | threshold: {d:.2}\n", .{ res.power, res.relay, POWER_THRESHOLD });
 
             if ((res.power <= POWER_THRESHOLD and res.power >= 20) and res.relay == true) {
                 var req_off = try client.request(.GET, uri_off, .{ .allocator = allocator }, .{});
