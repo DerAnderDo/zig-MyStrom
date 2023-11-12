@@ -58,8 +58,11 @@ fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !voi
     //    try response.headers.append("connection", "keep-alive");
     //}
 
+    response.transfer_encoding = .chunked;
+    try response.headers.append("content-type", "application/json");
+
     if (std.mem.startsWith(u8, response.request.target, "/power=")) { // change the power threshold for the myStrom plug
-        var powerSetting: f32 = try std.fmt.parseFloat(f32, response.request.target[7..]);
+        var powerSetting: f32 = std.fmt.parseFloat(f32, response.request.target[7..]) catch 0;
 
         // left in as a general note on how to convert numbers to a string/slice
         //var oldPower: [3]u8 = undefined;
@@ -75,12 +78,7 @@ fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !voi
         //} else {
         //    response.transfer_encoding = .{ .content_length = 10 };
         //}
-        response.transfer_encoding = .chunked;
-        // Set "content-type" header to "application/json" previously "text/plain"
-        try response.headers.append("content-type", "application/json");
 
-        // Write the response body
-        // Reply with previous power threshold
         try response.do();
         if (response.request.method != .HEAD) {
             try std.json.stringify(.{ .oldThreshold = POWER_THRESHOLD, .newThreshold = powerSetting }, .{}, response.writer());
@@ -88,8 +86,6 @@ fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !voi
         }
         POWER_THRESHOLD = powerSetting;
     } else if (std.mem.startsWith(u8, response.request.target, "/data")) { // request the last data containing power[W], relay state and the power threshold
-        response.transfer_encoding = .chunked;
-        try response.headers.append("content-type", "application/json");
         try response.do();
         if (response.request.method != .HEAD) {
             //try std.json.stringify(.{ .@"Current threshold" = oldPower }, .{}, response.writer()); // spaces are allowed in json... but that looks odd
