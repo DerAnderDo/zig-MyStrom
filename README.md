@@ -11,4 +11,4 @@ Run `systemctl start myStromer`
 ## To-do
 - Would be nice if the program would retain the threshold value after restarting
 ## Bugs
-- Crashes if a NaN value is sent to configure the threshold by REST API
+- Special case where the app crashes if a user runs a get request on for example /data, and the user already has a folder called data in the directory where he runs the command.
