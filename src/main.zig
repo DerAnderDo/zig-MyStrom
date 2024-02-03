@@ -1,99 +1,17 @@
-// TODO: restrict turn on before 21:00
-
 // -----myStrom part-----
 const std = @import("std");
-const serv = @import("server.zig");
+const serv = @import("mystromer_requesthandler.zig");
 //-----configuration API part-----
 const Thread = std.Thread;
-const log = std.log.scoped(.server); // use only this instead of std.debug.print in the future?
+const log = std.log.scoped(.server);
 const server_addr = "0.0.0.0";
 const server_port = 8000;
-var lastData: serv.Data = serv.Data{ .power = 0, .relay = false };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 12 }){};
 const allocator = gpa.allocator();
 
-// Run the server and handle incoming requests.
-fn runServer(server: *http.Server, alloc: std.mem.Allocator) !void {
-    outer: while (true) {
-        // Accept incoming connection.
-        var response = try server.accept(.{
-            .allocator = alloc,
-        });
-        defer response.deinit();
-
-        // putting this in a while loop makes no sense if the server just has to deliver one information once per request
-        //while (response.reset() != .closing) {
-        // Handle errors during request processing.
-        response.wait() catch |err| switch (err) {
-            error.HttpHeadersInvalid => continue :outer,
-            error.EndOfStream => continue,
-            else => return err,
-        };
-
-        // Process the request.
-        try handleRequest(&response, alloc);
-        _ = response.reset();
-        //}
-    }
-}
-
-fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !void {
-    // Log the request details.
-    log.info("{s} {s} {s}", .{ @tagName(response.request.method), @tagName(response.request.version), response.request.target });
-
-    // Read the request body.
-    const body = try response.reader().readAllAlloc(alloc, 8192);
-    defer alloc.free(body);
-
-    // Set "connection" header to "keep-alive" if present in request headers.
-    //if (response.request.headers.contains("connection")) {
-    //    try response.headers.append("connection", "keep-alive");
-    //}
-
-    response.transfer_encoding = .chunked;
-    try response.headers.append("content-type", "application/json");
-
-    if (std.mem.startsWith(u8, response.request.target, "/power=")) { // change the power threshold for the myStrom plug
-        var powerSetting: f32 = std.fmt.parseFloat(f32, response.request.target[7..]) catch 0;
-
-        // left in as a general note on how to convert numbers to a string/slice
-        //var oldPower: [3]u8 = undefined;
-        //_ = std.fmt.bufPrint(&oldPower, "{d}", .{POWER_THRESHOLD}) catch @panic("error");
-
-        //var newPower: [3]u8 = undefined;
-        //_ = std.fmt.bufPrint(&newPower, "{d}", .{powerSetting}) catch @panic("error");
-
-        // Is there a reason to not send it chunked? Maybe performance? Have to calculate content length if not chunked
-        // Check if the request target contains "?chunked".
-        //if (std.mem.indexOf(u8, response.request.target, "?chunked") != null) {
-        //    response.transfer_encoding = .chunked;
-        //} else {
-        //    response.transfer_encoding = .{ .content_length = 10 };
-        //}
-
-        try response.do();
-        if (response.request.method != .HEAD) {
-            try std.json.stringify(.{ .oldThreshold = POWER_THRESHOLD, .newThreshold = powerSetting }, .{}, response.writer());
-            try response.finish();
-        }
-        POWER_THRESHOLD = powerSetting;
-    } else if (std.mem.startsWith(u8, response.request.target, "/data")) { // request the last data containing power[W], relay state and the power threshold
-        try response.do();
-        if (response.request.method != .HEAD) {
-            //try std.json.stringify(.{ .@"Current threshold" = oldPower }, .{}, response.writer()); // spaces are allowed in json... but that looks odd
-            try std.json.stringify(.{ .currentThreshold = POWER_THRESHOLD, .power = lastData.power, .relay = lastData.relay }, .{}, response.writer());
-            try response.finish();
-        }
-    } else {
-        // Set the response status to 404 (not found).
-        response.status = .not_found;
-        try response.do();
-    }
-}
-
 pub fn main() !void {
-    var client: http.Client = .{ .allocator = allocator };
+    var client: serv.http.Client = .{ .allocator = allocator };
     defer client.deinit();
 
     // configuration API loop
@@ -105,8 +23,8 @@ pub fn main() !void {
         std.time.sleep(30 * 1000 * 1000 * 1000);
 
         // if successful, move on, if error, continue (jump back to start)
-        var req = client.request(.GET, uri, .{ .allocator = allocator }, .{}) catch |err| {
-            std.debug.print("Error while sending GET request: {s}\n", .{@errorName(err)});
+        var req = client.request(.GET, serv.uri, .{ .allocator = allocator }, .{}) catch |err| {
+            log.err("Error while sending GET request: {s}\n", .{@errorName(err)});
             continue;
         };
 
@@ -121,13 +39,13 @@ pub fn main() !void {
         if (validateJson(body)) {
 
             //parse json string
-            const res = try std.json.parseFromSliceLeaky(Data, allocator, body, .{ .ignore_unknown_fields = true });
-            lastData = res;
+            const res = try std.json.parseFromSliceLeaky(serv.Data, allocator, body, .{ .ignore_unknown_fields = true });
+            serv.lastData = res;
             //read power value and relays state to decide if to turn off or not
-            //std.debug.print("current power: {d:.2} | relay: {} | threshold: {d:.2}\n", .{ res.power, res.relay, POWER_THRESHOLD });
+            //std.debug.print("current power: {d:.2} | relay: {} | threshold: {d:.2}\n", .{ res.power, res.relay, serv.POWER_THRESHOLD });
 
-            if ((res.power <= POWER_THRESHOLD and res.power >= 20) and res.relay == true) {
-                var req_off = try client.request(.GET, uri_off, .{ .allocator = allocator }, .{});
+            if ((res.power <= serv.POWER_THRESHOLD and res.power >= 20) and res.relay == true) {
+                var req_off = try client.request(.GET, serv.uri_off, .{ .allocator = allocator }, .{});
                 defer req_off.deinit();
                 try req_off.start(.{});
                 try req_off.wait();
@@ -138,7 +56,7 @@ pub fn main() !void {
 
 fn threadWork() !void {
     // Initialize the server.
-    var server = http.Server.init(allocator, .{ .reuse_address = true });
+    var server = serv.http.Server.init(allocator, .{ .reuse_address = true });
     defer server.deinit();
 
     // Log the server address and port.
@@ -150,7 +68,7 @@ fn threadWork() !void {
 
     while (true) {
         // Run the server.
-        runServer(&server, allocator) catch |err| {
+        serv.runServer(&server, allocator) catch |err| {
             // Handle server errors.
             log.err("server error: {}\n", .{err});
             if (@errorReturnTrace()) |trace| {
@@ -162,9 +80,9 @@ fn threadWork() !void {
 }
 
 fn validateJson(string: []const u8) bool { // function wrapper
-    var scanneroni = std.json.validate(allocator, string) catch false;
+    const scanneroni = std.json.validate(allocator, string) catch false;
     if (scanneroni == false) {
-        std.debug.print("JSON string is NOT valid!\n", .{});
+        log.err("JSON string is NOT valid!\n", .{});
         return false;
     } else {
         return true;
