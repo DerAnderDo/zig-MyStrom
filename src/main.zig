@@ -2,20 +2,13 @@
 
 // -----myStrom part-----
 const std = @import("std");
-const http = std.http;
-const uri = std.Uri.parse("http://192.168.2.25/report") catch unreachable;
-const uri_off = std.Uri.parse("http://192.168.2.25/relay?state=0") catch unreachable;
-var POWER_THRESHOLD: f32 = 120; // default value, maybe saved the last value received through HTTP API?
-const Data = struct {
-    power: f32,
-    relay: bool,
-};
+const serv = @import("server.zig");
 //-----configuration API part-----
 const Thread = std.Thread;
 const log = std.log.scoped(.server); // use only this instead of std.debug.print in the future?
 const server_addr = "0.0.0.0";
 const server_port = 8000;
-var lastData: Data = Data{ .power = 0, .relay = false };
+var lastData: serv.Data = serv.Data{ .power = 0, .relay = false };
 
 var gpa = std.heap.GeneralPurposeAllocator(.{ .stack_trace_frames = 12 }){};
 const allocator = gpa.allocator();
