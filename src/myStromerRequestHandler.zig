@@ -1,9 +1,10 @@
 const std = @import("std");
 pub const http = std.http;
-pub const uri = std.Uri.parse("http://192.168.2.25/report") catch unreachable;
+pub const uri_report = std.Uri.parse("http://192.168.2.25/report") catch unreachable;
 pub const uri_off = std.Uri.parse("http://192.168.2.25/relay?state=0") catch unreachable;
-pub var POWER_THRESHOLD: f32 = 120; // default value, maybe saved the last value received through HTTP API?
+pub var POWER_THRESHOLD: f32 = 120; // default value, maybe save the last value received through HTTP API?
 pub var lastData: Data = Data{ .power = 0, .relay = false };
+
 pub const Data = struct {
     power: f32,
     relay: bool,
@@ -67,14 +68,12 @@ fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !voi
         //    response.transfer_encoding = .{ .content_length = 10 };
         //}
 
-        try response.do();
         if (response.request.method != .HEAD) {
             try std.json.stringify(.{ .oldThreshold = POWER_THRESHOLD, .newThreshold = powerSetting }, .{}, response.writer());
             try response.finish();
         }
         POWER_THRESHOLD = powerSetting;
     } else if (std.mem.startsWith(u8, response.request.target, "/data")) { // request the last data containing power[W], relay state and the power threshold
-        try response.do();
         if (response.request.method != .HEAD) {
             //try std.json.stringify(.{ .@"Current threshold" = oldPower }, .{}, response.writer()); // spaces are allowed in json... but that looks odd
             try std.json.stringify(.{ .currentThreshold = POWER_THRESHOLD, .power = lastData.power, .relay = lastData.relay }, .{}, response.writer());
@@ -83,6 +82,5 @@ fn handleRequest(response: *http.Server.Response, alloc: std.mem.Allocator) !voi
     } else {
         // Set the response status to 404 (not found).
         response.status = .not_found;
-        try response.do();
     }
 }
